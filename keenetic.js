@@ -3,6 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const logger = require('./logger');
 
 // --- Настройки ---
 const ROUTER_IP = process.env.ROUTER_IP;
@@ -57,10 +58,10 @@ class KeeneticClient {
             try {
                 const data = fs.readFileSync(COOKIES_FILE, 'utf8');
                 this.cookies = JSON.parse(data);
-                console.log(`Куки загружены из ${COOKIES_FILE}`);
+                logger.debug(`Куки загружены из ${COOKIES_FILE}`);
                 return true;
             } catch (e) {
-                console.error(`Ошибка загрузки куки: ${e.message}`);
+                logger.debug(`Ошибка загрузки куки: ${e.message}`);
             }
         }
         return false;
@@ -72,43 +73,43 @@ class KeeneticClient {
                 fs.mkdirSync(path.dirname(COOKIES_FILE), { recursive: true });
             }
             fs.writeFileSync(COOKIES_FILE, JSON.stringify(this.cookies, null, 2));
-            console.log(`Куки сохранены в ${COOKIES_FILE}`);
+            logger.info(`Куки сохранены в ${COOKIES_FILE}`);
         } catch (e) {
-            console.error(`Ошибка сохранения куки: ${e.message}`);
+            logger.error(`Ошибка сохранения куки: ${e.message}`);
         }
     }
 
     async authenticate() {
         // 1. Попытка восстановить сессию
         if (this.loadCookies()) {
-            console.log("Проверка сохраненной сессии...");
+            logger.debug("Проверка сохраненной сессии...");
             try {
                 const res = await this.client.get('/rci/show/system');
                 if (res.status === 200) {
-                    console.log("Сессия валидна.");
+                    logger.debug("Сессия валидна.");
                     return true;
                 } else {
-                    console.log(`Сессия устарела (код ${res.status}). Требуется повторная авторизация.`);
+                    logger.debug(`Сессия устарела (код ${res.status}). Требуется повторная авторизация.`);
                 }
             } catch (e) {
-                console.log(`Ошибка при проверке сессии: ${e.message}`);
+                logger.debug(`Ошибка при проверке сессии: ${e.message}`);
             }
         }
 
         // 2. Начало новой авторизации
-        console.log("--- Шаг 1: Получение Challenge ---");
+        logger.debug("--- Шаг 1: Получение Challenge ---");
         const r1 = await this.client.get('/auth');
-        
+
         const challenge = r1.headers['x-ndm-challenge'];
         const realm = r1.headers['x-ndm-realm'];
         const product = r1.headers['x-ndm-product'];
 
-        console.log(`X-NDM-Challenge: ${challenge}`);
-        console.log(`X-NDM-Realm: ${realm}`);
-        console.log(`X-NDM-Product: ${product}`);
+        logger.debug(`X-NDM-Challenge: ${challenge}`); // Changed to debug
+        logger.debug(`X-NDM-Realm: ${realm}`); // Changed to debug
+        logger.debug(`X-NDM-Product: ${product}`); // Changed to debug
 
         if (!challenge || !realm) {
-            console.error("Ошибка: не удалось получить данные для авторизации.");
+            logger.error("Ошибка: не удалось получить данные для авторизации.");
             return false;
         }
 
@@ -116,56 +117,57 @@ class KeeneticClient {
         // Формула: SHA256(challenge + MD5(login + ":" + realm + ":" + password))
         const h1String = `${LOGIN}:${realm}:${PASSWORD}`;
         const h1 = getMd5(h1String);
-        console.log(`MD5(${h1String}): ${h1}`);
+        logger.debug(`MD5(${h1String}): ${h1}`); // Changed to debug
 
         const finalHash = getSha256(challenge + h1);
-        console.log(`\nВычисленный хеш: ${finalHash}`);
+        logger.debug(`\nВычисленный хеш: ${finalHash}`); // Changed to debug
 
         // 4. Отправка хеша
-        console.log("\n--- Шаг 2: Отправка хеша ---");
+        logger.debug("\n--- Шаг 2: Отправка хеша ---");
         const authData = {
             login: LOGIN,
             password: finalHash
         };
 
         const r2 = await this.client.post('/auth', authData);
-        console.log(`Статус ответа: ${r2.status}`);
+        logger.debug(`Статус ответа: ${r2.status}`);
 
         if (r2.status === 200) {
-            console.log("Авторизация успешна!");
-            console.log("Полученные куки (сессия):", this.cookies);
+            logger.debug("Авторизация успешна!");
+            logger.debug(`Полученные куки (сессия): ${JSON.stringify(this.cookies)}`);
             this.saveCookies();
             return true;
         } else {
-            console.error("Ошибка авторизации!");
+            logger.error("Ошибка авторизации!");
             return false;
         }
     }
 
     async getSystemInfo() {
-        console.log("\n--- Шаг 3: Тестовый запрос (show system) ---");
+        logger.info("--- Шаг 3: Тестовый запрос (show system) ---");
         const res = await this.client.get('/rci/show/system');
         if (res.status === 200) {
             const data = res.data;
-            // console.log('DEBUG:', JSON.stringify(data, null, 2)); // Uncomment for debug
-            console.log(`Модель устройства: ${data.model}`);
-            console.log(`Версия ОС: ${data.release}`);
-            console.log(`Аптайм: ${data.uptime} сек.`);
+            // logger.debug(`DEBUG: ${JSON.stringify(data, null, 2)}`); // Uncomment for debug
+            logger.info(`SYSTEM INFO: Hostname: ${data.hostname}\t Uptime: ${data.uptime} сек.`);
+            // logger.info(`Модель устройства: ${data.hostname}`);
+            // logger.info(`Версия ОС: ${data.release}`);
+            // logger.info(`Аптайм: ${data.uptime} сек.`);
         } else {
-            console.log(`Ошибка RCI: ${res.status}`);
+            logger.error(`Ошибка RCI: ${res.status}`);
         }
     }
 
     async getHotspotClients() {
-        console.log("\n--- Шаг 4: Список клиентов (show ip hotspot) ---");
+        logger.info("--- Шаг 4: Список клиентов (show ip hotspot) ---");
         const res = await this.client.get('/rci/show/ip/hotspot');
-        
+
         if (res.status === 200) {
             let clients = res.data;
-            
+
             // Нормализация ответа
             if (clients && !Array.isArray(clients) && typeof clients === 'object') {
-                 clients = clients.host || [];
+                clients = clients.host || [];
             }
             if (!Array.isArray(clients)) {
                 clients = [];
@@ -173,10 +175,10 @@ class KeeneticClient {
 
             const activeClients = clients.filter(c => c.active);
 
-            console.log(`Найдено активных клиентов: ${activeClients.length}`);
-            console.log("-".repeat(60));
-            console.log(`${"IP Address".padEnd(16)} | ${"MAC Address".padEnd(18)} | ${"Hostname"}`);
-            console.log("-".repeat(60));
+            logger.info(`Найдено активных клиентов: ${activeClients.length}`);
+            logger.debug("-".repeat(60));
+            logger.debug(`${"IP Address".padEnd(16)} | ${"MAC Address".padEnd(18)} | ${"Hostname"}`);
+            logger.debug("-".repeat(60));
 
             activeClients.forEach(client => {
                 const ip = client.ip || 'N/A';
@@ -185,10 +187,10 @@ class KeeneticClient {
                 const hostname = client.hostname || '';
                 if (!name) name = hostname || 'Unknown';
 
-                console.log(`${ip.padEnd(16)} | ${mac.padEnd(18)} | ${name}`);
+                logger.debug(`${ip.padEnd(16)} | ${mac.padEnd(18)} | ${name}`);
             });
         } else {
-            console.log(`Ошибка получения списка клиентов: ${res.status}`);
+            logger.error(`Ошибка получения списка клиентов: ${res.status}`);
         }
     }
 }
@@ -196,13 +198,13 @@ class KeeneticClient {
 module.exports = KeeneticClient;
 
 // --- Запуск ---
-// console.log('KeeneticClient module loaded.');
-// console.log('require.main === module:', require.main === module);
+// logger.info('KeeneticClient module loaded.');
+// logger.info('require.main === module:', require.main === module);
 
 if (require.main === module) {
     (async () => {
         if (!ROUTER_IP || !LOGIN || !PASSWORD) {
-            console.error("Ошибка: Не заданы переменные окружения ROUTER_IP, LOGIN, PASSWORD");
+            logger.error("Ошибка: Не заданы переменные окружения ROUTER_IP, LOGIN, PASSWORD");
             process.exit(1);
         }
 
