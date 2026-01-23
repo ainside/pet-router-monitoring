@@ -1,0 +1,139 @@
+const { PrismaClient } = require('@prisma/client');
+const logger = require('./logger');
+
+const prisma = new PrismaClient({
+    datasourceUrl: process.env.DATABASE_URL
+});
+
+class MonitorService {
+    constructor() {
+        this.prisma = prisma;
+    }
+
+    /**
+     * Updates client status in DB based on fetched list
+     * @param {Array} fetchedClients - List of active clients from Router
+     */
+    async updateClients(fetchedClients) {
+        if (!Array.isArray(fetchedClients)) return;
+
+        const now = new Date();
+        const fetchedMap = new Map();
+        
+        // 1. Process Fetched Clients
+        for (const fc of fetchedClients) {
+            if (!fc.mac) continue;
+            fetchedMap.set(fc.mac, fc);
+
+            const mac = fc.mac;
+            const ip = fc.ip || null;
+            const name = fc.name || fc.hostname || null;
+            const hostname = fc.hostname || null;
+            const iface = fc.interface || null; // 'interface' might be reserved?
+            const ssid = fc.ssid || null;
+
+            // Check if client exists
+            const existing = await this.prisma.client.findUnique({ where: { mac } });
+
+            if (!existing) {
+                // New Client
+                logger.info(`[Monitor] New client detected: ${mac} (${name})`);
+                await this.prisma.client.create({
+                    data: {
+                        mac, ip, name, hostname, interface: iface, ssid,
+                        isOnline: true,
+                        firstSeen: now,
+                        lastSeen: now,
+                        lastStatusChange: now
+                    }
+                });
+                await this.logEvent(mac, 'CONNECTED', 'New device detected');
+            } else {
+                // Existing Client
+                const wasOnline = existing.isOnline;
+                let details = [];
+
+                // Check for Info Changes
+                if (existing.ip !== ip) details.push(`IP: ${existing.ip} -> ${ip}`);
+                if (existing.name !== name && name) details.push(`Name: ${existing.name} -> ${name}`);
+                if (existing.interface !== iface && iface) details.push(`Interface: ${existing.interface} -> ${iface}`);
+                if (existing.ssid !== ssid && ssid) details.push(`SSID: ${existing.ssid} -> ${ssid}`);
+
+                // Update Data
+                const updateData = {
+                    lastSeen: now,
+                    ip, name, hostname, interface: iface, ssid,
+                    isOnline: true
+                };
+
+                // Logic for Offline -> Online
+                if (!wasOnline) {
+                    const offlineDurationMs = now.getTime() - existing.lastStatusChange.getTime();
+                    const offlineText = this.formatDuration(offlineDurationMs);
+                    
+                    logger.info(`[Monitor] Client back online: ${mac} (Offline for ${offlineText})`);
+                    
+                    updateData.lastStatusChange = now;
+                    await this.logEvent(mac, 'CONNECTED', `Back online. Offline for ${offlineText}`);
+                } else if (details.length > 0) {
+                     logger.info(`[Monitor] Client updated: ${mac} - ${details.join(', ')}`);
+                     await this.logEvent(mac, 'UPDATED', details.join(', '));
+                }
+
+                await this.prisma.client.update({
+                    where: { mac },
+                    data: updateData
+                });
+            }
+        }
+
+        // 2. Process Disconnected Clients (In DB as Online, but not in fetched list)
+        const onlineClients = await this.prisma.client.findMany({
+            where: { isOnline: true }
+        });
+
+        for (const dbClient of onlineClients) {
+            if (!fetchedMap.has(dbClient.mac)) {
+                // Client went offline
+                const onlineDurationMs = now.getTime() - dbClient.lastStatusChange.getTime();
+                const onlineText = this.formatDuration(onlineDurationMs);
+                const onlineSeconds = Math.floor(onlineDurationMs / 1000);
+
+                logger.info(`[Monitor] Client disconnected: ${dbClient.mac} (Online for ${onlineText})`);
+
+                await this.prisma.client.update({
+                    where: { mac: dbClient.mac },
+                    data: {
+                        isOnline: false,
+                        lastStatusChange: now,
+                        totalOnlineSeconds: { increment: onlineSeconds }
+                    }
+                });
+
+                await this.logEvent(dbClient.mac, 'DISCONNECTED', `Online for ${onlineText}`);
+            }
+        }
+    }
+
+    async logEvent(mac, type, details) {
+        await this.prisma.event.create({
+            data: {
+                clientMac: mac,
+                type,
+                details
+            }
+        });
+    }
+
+    formatDuration(ms) {
+        const seconds = Math.floor(ms / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        
+        if (hours > 0) return `${hours}h ${minutes % 60}m`;
+        if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+        return `${seconds}s`;
+    }
+}
+
+module.exports = new MonitorService();

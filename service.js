@@ -1,5 +1,6 @@
 const KeeneticClient = require('./keenetic');
 const logger = require('./logger');
+const monitorService = require('./monitor');
 
 const args = process.argv.slice(2);
 const runOnce = args.includes('--once');
@@ -14,7 +15,8 @@ async function run() {
         const isAuth = await keenetic.authenticate();
         if (isAuth) {
             await keenetic.getSystemInfo();
-            await keenetic.getHotspotClients();
+            const clients = await keenetic.getHotspotClients();
+            await monitorService.updateClients(clients);
         }
     } catch (error) {
         logger.error(`Ошибка выполнения: ${error.message}`);

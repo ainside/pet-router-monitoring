@@ -13,5 +13,9 @@
     "axios": "^1.13.2",
     "dotenv": "^17.2.3",
     "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "@prisma/client": "^5.22.0",
+    "prisma": "^5.22.0"
   }
 }

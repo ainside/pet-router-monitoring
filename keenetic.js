@@ -189,8 +189,11 @@ class KeeneticClient {
 
                 logger.debug(`${ip.padEnd(16)} | ${mac.padEnd(18)} | ${name}`);
             });
+
+            return activeClients;
         } else {
             logger.error(`Ошибка получения списка клиентов: ${res.status}`);
+            return [];
         }
     }
 }

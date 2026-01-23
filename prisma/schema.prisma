@@ -1,0 +1,37 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Client {
+  mac              String   @id
+  ip               String?
+  name             String?
+  hostname         String?
+  interface        String?
+  ssid             String?
+  
+  isOnline         Boolean  @default(false)
+  firstSeen        DateTime @default(now())
+  lastSeen         DateTime @default(now())
+  
+  lastStatusChange DateTime @default(now()) 
+  totalOnlineSeconds Int    @default(0)
+
+  events           Event[]
+}
+
+model Event {
+  id        Int      @id @default(autoincrement())
+  type      String   // CONNECTED, DISCONNECTED, UPDATED
+  timestamp DateTime @default(now())
+  details   String?
+  client    Client   @relation(fields: [clientMac], references: [mac])
+  clientMac String
+}
