@@ -20,6 +20,7 @@ async function run() {
         }
     } catch (error) {
         logger.error(`Ошибка выполнения: ${error.message}`);
+        logger.error(error.stack);
     }
 }
 

@@ -1,9 +1,12 @@
 const { PrismaClient } = require('@prisma/client');
+const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
 const logger = require('./logger');
 
-const prisma = new PrismaClient({
-    datasourceUrl: process.env.DATABASE_URL
+// Setup adapter for Prisma 7
+const adapter = new PrismaBetterSqlite3({
+    url: process.env.DATABASE_URL
 });
+const prisma = new PrismaClient({ adapter });
 
 class MonitorService {
     constructor() {
@@ -29,7 +32,19 @@ class MonitorService {
             const ip = fc.ip || null;
             const name = fc.name || fc.hostname || null;
             const hostname = fc.hostname || null;
-            const iface = fc.interface || null; // 'interface' might be reserved?
+            
+            // Extract interface name properly (it can be an object or string)
+            let iface = null;
+            if (fc.interface) {
+                if (typeof fc.interface === 'string') {
+                    iface = fc.interface;
+                } else if (typeof fc.interface === 'object' && fc.interface.name) {
+                    iface = fc.interface.name; // e.g., "Home"
+                } else if (typeof fc.interface === 'object' && fc.interface.id) {
+                    iface = fc.interface.id;   // e.g., "Bridge0"
+                }
+            }
+            
             const ssid = fc.ssid || null;
 
             // Check if client exists
