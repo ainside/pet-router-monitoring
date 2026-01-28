@@ -154,6 +154,24 @@ class MonitorService {
         });
     }
 
+    /**
+     * Get event history for a specific client or all clients
+     * @param {string|null} mac - MAC address of the client (optional)
+     * @param {number} limit - Number of events to retrieve (default: 10)
+     * @returns {Promise<Array>} List of events with client details
+     */
+    async getClientHistory(mac, limit = 10) {
+        const where = mac ? { clientMac: mac } : {};
+        return this.prisma.event.findMany({
+            where,
+            orderBy: { timestamp: 'desc' },
+            take: limit,
+            include: {
+                client: true
+            }
+        });
+    }
+
     async logEvent(mac, type, details) {
         await this.prisma.event.create({
             data: {

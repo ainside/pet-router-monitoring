@@ -144,12 +144,12 @@ class KeeneticClient {
     }
 
     async getSystemInfo() {
-        logger.info("--- Шаг 3: Тестовый запрос (show system) ---");
+        logger.debug("--- Шаг 3: Тестовый запрос (show system) ---");
         const res = await this.client.get('/rci/show/system');
         if (res.status === 200) {
             const data = res.data;
             // logger.debug(`DEBUG: ${JSON.stringify(data, null, 2)}`); // Uncomment for debug
-            logger.info(`SYSTEM INFO: Hostname: ${data.hostname}\t Uptime: ${data.uptime} сек.`);
+            logger.debug(`SYSTEM INFO: Hostname: ${data.hostname}\t Uptime: ${data.uptime} сек.`);
             // logger.info(`Модель устройства: ${data.hostname}`);
             // logger.info(`Версия ОС: ${data.release}`);
             // logger.info(`Аптайм: ${data.uptime} сек.`);
@@ -159,7 +159,7 @@ class KeeneticClient {
     }
 
     async getHotspotClients() {
-        logger.info("--- Шаг 4: Список клиентов (show ip hotspot) ---");
+        logger.debug("--- Шаг 4: Список клиентов (show ip hotspot) ---");
         const res = await this.client.get('/rci/show/ip/hotspot');
 
         if (res.status === 200) {

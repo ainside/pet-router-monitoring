@@ -86,11 +86,94 @@ function saveSubscribers() {
 
 // --- Команды Бота ---
 
-bot.start((ctx) => {
+// --- Общая логика для истории ---
+async function handleHistoryCommand(ctx, mac, count = 10) {
+    // Если MAC не передан (или пустой), будем считать это запросом глобальной истории.
+    // Если передан "all", тоже считаем глобальной историей.
+    let normalizedMac = null;
+    if (mac && mac.toLowerCase() !== 'all') {
+        normalizedMac = mac.replace(/_/g, ':');
+    }
+    
+    try {
+        const events = await monitorService.getClientHistory(normalizedMac, count);
+        
+        if (events.length === 0) {
+            const target = normalizedMac ? normalizedMac : 'всех клиентов';
+            return ctx.reply(`📜 История для ${target} пуста.`);
+        }
+
+        let header;
+        if (normalizedMac) {
+             const clientName = events[0].client.name || events[0].client.hostname || normalizedMac;
+             header = `<b>📜 История событий для ${clientName} (${events.length}):</b>\n`;
+        } else {
+             header = `<b>📜 Последние события (${events.length}):</b>\n`;
+        }
+        
+        const lines = events.map(e => {
+            const date = new Date(e.timestamp);
+            const timeStr = date.toLocaleString('ru-RU', { 
+                day: '2-digit', month: '2-digit', 
+                hour: '2-digit', minute: '2-digit' 
+            });
+            
+            let icon = '⚪';
+            if (e.type === 'CONNECTED') icon = '🟢';
+            else if (e.type === 'DISCONNECTED') icon = '🔴';
+            else if (e.type === 'UPDATED') icon = '🔵';
+
+            const name = e.client.name || e.client.hostname || e.clientMac;
+            // Если история глобальная, добавляем имя клиента в строку
+            const details = normalizedMac ? (e.details || e.type) : `<b>${name}</b>: ${e.details || e.type}`;
+
+            return `${icon} ${timeStr} - ${details}`;
+        });
+
+        const message = header + '\n' + lines.join('\n');
+        
+        if (message.length > 4000) {
+            ctx.replyWithHTML(message.substring(0, 4000) + '\n...');
+        } else {
+            ctx.replyWithHTML(message);
+        }
+    } catch (e) {
+        logger.error(`Ошибка получения истории для ${normalizedMac || 'all'}:`, e);
+        ctx.reply('❌ Ошибка при получении истории.');
+    }
+}
+
+bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
-    botLogger.info(`Получена команда /start от ${chatId} (@${ctx.from?.username})`);
     addSubscriber(chatId);
+
+    // Проверка payload (deep linking)
+    const payload = ctx.payload || (ctx.message.text.split(' ')[1]); 
+    if (payload && payload.startsWith('history_')) {
+        botLogger.info(`Deep link history request от ${chatId}`);
+        
+        // Удаляем сообщение /start чтобы не засорять чат
+        try {
+            await ctx.deleteMessage();
+        } catch (e) {
+            logger.warn(`Не удалось удалить сообщение /start: ${e.message}`);
+        }
+
+        const mac = payload.replace('history_', '');
+        return handleHistoryCommand(ctx, mac);
+    }
+
+    botLogger.info(`Получена команда /start от ${chatId} (@${ctx.from?.username})`);
     ctx.reply('✅ Бот запущен! Теперь я буду присылать уведомления о статусе клиентов сети Keenetic.\n\nИспользуйте /list для просмотра активных клиентов.');
+});
+
+bot.command('history', async (ctx) => {
+    botLogger.info(`Получена команда /history от ${ctx.chat.id}`);
+    const parts = ctx.message.text.split(' ');
+    const mac = parts[1];
+    const count = parts[2] ? parseInt(parts[2]) : 10;
+    
+    await handleHistoryCommand(ctx, mac, count);
 });
 
 bot.command('list', async (ctx) => {
@@ -105,12 +188,28 @@ bot.command('list', async (ctx) => {
             // Форматирование даты
             const date = new Date(c.lastStatusChange);
             const timeStr = date.toLocaleString('ru-RU', { 
-                day: '2-digit', month: '2-digit', 
+                day: '2-digit', month: '2-digit', year: 'numeric',
                 hour: '2-digit', minute: '2-digit', second: '2-digit' 
             });
             
-            const name = c.name || c.hostname || c.mac;
-            return `📱 <b>${name}</b>\n└ 🕒 В сети с: ${timeStr}\n└ 🌐 IP: ${c.ip || 'N/A'} | ${c.interface || '?'}`;
+            // Формируем ссылку для скрытого вызова команды через Deep Linking
+            // Если бот запущен, ctx.botInfo должен быть доступен. Если нет, fallback на обычный текст.
+            const botUsername = ctx.botInfo?.username;
+            let macDisplay = c.mac || '';
+            
+            if (c.mac && botUsername) {
+                // Заменяем двоеточия на _, так как в URL параметры могут быть ограничены
+                const macParam = c.mac.replace(/:/g, '_');
+                macDisplay = `<a href="https://t.me/${botUsername}?start=history_${macParam}">${c.mac}</a>`;
+            }
+
+            // Расчет Uptime
+            const now = new Date();
+            const uptimeMs = now.getTime() - date.getTime();
+            const uptimeStr = monitorService.formatDuration(uptimeMs);
+
+            const name = `${c.hostname || c.name || 'N/A'}  -  ${macDisplay}  -  🌐 IP: ${c.ip || 'N/A'}`;
+            return `📱 <b>${name}</b>\n└ 🕒 В сети с: ${timeStr} (${uptimeStr})`;
         });
 
         // Разбиваем на сообщения, если список слишком длинный (лимит Telegram ~4096)
@@ -130,8 +229,11 @@ bot.command('list', async (ctx) => {
 });
 
 // Запуск бота
-bot.launch().then(() => {
+bot.launch().then(async () => {
     logger.info('Telegram bot started.');
+    // Запуск первичного сканирования при старте
+    logger.info('Выполнение первичного сканирования сети...');
+    await runNetworkScan();
 }).catch(err => {
     logger.error('Ошибка запуска Telegram бота:', err);
 });
@@ -141,10 +243,10 @@ process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 // --- Периодический опрос (Cron) ---
+const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/2 * * * *';
 
-// Запуск каждую минуту
-cron.schedule('* * * * *', async () => {
-    logger.info('Запуск периодического опроса (cron)...');
+async function runNetworkScan() {
+    logger.info('Запуск сканирования сети...');
     
     if (subscribers.size === 0) {
         logger.warn('Нет подписчиков (Chat ID). Отправьте /start боту.');
@@ -198,4 +300,10 @@ cron.schedule('* * * * *', async () => {
         logger.error(`Ошибка выполнения опроса: ${error.message}`);
         logger.error(error.stack);
     }
+}
+
+// Запуск по расписанию
+cron.schedule(CRON_SCHEDULE, async () => {
+    logger.info(`Запуск периодического опроса (cron) [${CRON_SCHEDULE}]...`);
+    await runNetworkScan();
 });
