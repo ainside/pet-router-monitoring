@@ -1,5 +1,5 @@
 const KeeneticClient = require('./keenetic');
-const logger = require('./logger');
+const { logger } = require('./logger');
 const monitorService = require('./monitor');
 
 const args = process.argv.slice(2);

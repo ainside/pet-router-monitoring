@@ -3,7 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const logger = require('./logger');
+const { logger } = require('./logger');
 
 // --- Настройки ---
 const ROUTER_IP = process.env.ROUTER_IP;

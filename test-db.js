@@ -1,6 +1,7 @@
 const Database = require('better-sqlite3');
 const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
 const { PrismaClient } = require('@prisma/client');
+const { logger } = require('./logger');
 const path = require('path');
 
 const dbPath = path.join(__dirname, 'dev.db');

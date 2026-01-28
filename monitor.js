@@ -1,6 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
-const logger = require('./logger');
+const { logger } = require('./logger');
 
 // Setup adapter for Prisma 7
 const adapter = new PrismaBetterSqlite3({
@@ -16,9 +16,11 @@ class MonitorService {
     /**
      * Updates client status in DB based on fetched list
      * @param {Array} fetchedClients - List of active clients from Router
+     * @returns {Promise<Array>} List of changes/events
      */
     async updateClients(fetchedClients) {
-        if (!Array.isArray(fetchedClients)) return;
+        const changes = [];
+        if (!Array.isArray(fetchedClients)) return changes;
 
         const now = new Date();
         const fetchedMap = new Map();
@@ -53,7 +55,7 @@ class MonitorService {
             if (!existing) {
                 // New Client
                 logger.info(`[Monitor] New client detected: ${mac} (${name})`);
-                await this.prisma.client.create({
+                const newClient = await this.prisma.client.create({
                     data: {
                         mac, ip, name, hostname, interface: iface, ssid,
                         isOnline: true,
@@ -63,6 +65,7 @@ class MonitorService {
                     }
                 });
                 await this.logEvent(mac, 'CONNECTED', 'New device detected');
+                changes.push({ type: 'CONNECTED', client: newClient, message: 'New device detected' });
             } else {
                 // Existing Client
                 const wasOnline = existing.isOnline;
@@ -86,13 +89,23 @@ class MonitorService {
                     const offlineDurationMs = now.getTime() - existing.lastStatusChange.getTime();
                     const offlineText = this.formatDuration(offlineDurationMs);
                     
-                    logger.info(`[Monitor] Client back online: ${mac} (Offline for ${offlineText})`);
+                    logger.info(`[Monitor] Клиент ${mac} снова в сети: ${name} (Оффлайн for ${offlineText})`);
                     
                     updateData.lastStatusChange = now;
                     await this.logEvent(mac, 'CONNECTED', `Back online. Offline for ${offlineText}`);
+                    
+                    // Merge existing with updateData for the event object
+                    changes.push({ 
+                        type: 'CONNECTED', 
+                        client: { ...existing, ...updateData }, 
+                        message: `Back online. Offline for ${offlineText}` 
+                    });
                 } else if (details.length > 0) {
-                     logger.info(`[Monitor] Client updated: ${mac} - ${details.join(', ')}`);
-                     await this.logEvent(mac, 'UPDATED', details.join(', '));
+                    logger.info(`[Monitor] Client updated: ${mac} - ${details.join(', ')}`);
+                    await this.logEvent(mac, 'UPDATED', details.join(', '));
+                    // Optional: Notify on updates too? Maybe not requested, but good for logs.
+                    // keeping it out of 'changes' to reduce spam unless user asked for it.
+                    // User asked: "appearance in network / or exit from network". So updates are not required.
                 }
 
                 await this.prisma.client.update({
@@ -110,11 +123,12 @@ class MonitorService {
         for (const dbClient of onlineClients) {
             if (!fetchedMap.has(dbClient.mac)) {
                 // Client went offline
+                const now = new Date();
                 const onlineDurationMs = now.getTime() - dbClient.lastStatusChange.getTime();
                 const onlineText = this.formatDuration(onlineDurationMs);
                 const onlineSeconds = Math.floor(onlineDurationMs / 1000);
 
-                logger.info(`[Monitor] Client disconnected: ${dbClient.mac} (Online for ${onlineText})`);
+                logger.info(`[Monitor] Клиент ${dbClient.mac} отключился: ${dbClient.name} (Online for ${onlineText})`);
 
                 await this.prisma.client.update({
                     where: { mac: dbClient.mac },
@@ -126,8 +140,18 @@ class MonitorService {
                 });
 
                 await this.logEvent(dbClient.mac, 'DISCONNECTED', `Online for ${onlineText}`);
+                changes.push({ type: 'DISCONNECTED', client: dbClient, message: `Online for ${onlineText}` });
             }
         }
+        
+        return changes;
+    }
+
+    async getOnlineClients() {
+        return this.prisma.client.findMany({
+            where: { isOnline: true },
+            orderBy: { lastStatusChange: 'desc' }
+        });
     }
 
     async logEvent(mac, type, details) {
@@ -145,9 +169,9 @@ class MonitorService {
         const minutes = Math.floor(seconds / 60);
         const hours = Math.floor(minutes / 60);
         
-        if (hours > 0) return `${hours}h ${minutes % 60}m`;
-        if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-        return `${seconds}s`;
+        if (hours > 0) return `${hours}ч ${minutes % 60}м`;
+        if (minutes > 0) return `${minutes}м ${seconds % 60}с`;
+        return `${seconds}с`;
     }
 }
 
