@@ -8,6 +8,7 @@ const monitorService = require('./monitor');
 const { logger, botLogger } = require('./logger');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const BOT_USERNAME = process.env.BOT_USERNAME;
 const CHAT_ID_FILE = path.join(__dirname, 'data', 'chat_id.json');
 
 if (!BOT_TOKEN) {
@@ -25,7 +26,7 @@ const ALLOWED_USERS = process.env.ALLOWED_USERS ? process.env.ALLOWED_USERS.spli
 bot.use((ctx, next) => {
     // Если ALLOWED_USERS не задан в .env, считаем что ограничений нет (совместимость).
     // Если задан, но пуст - никого не пускаем.
-    
+
     if (process.env.ALLOWED_USERS === undefined) {
         return next();
     }
@@ -94,10 +95,10 @@ async function handleHistoryCommand(ctx, mac, count = 10) {
     if (mac && mac.toLowerCase() !== 'all') {
         normalizedMac = mac.replace(/_/g, ':');
     }
-    
+
     try {
         const events = await monitorService.getClientHistory(normalizedMac, count);
-        
+
         if (events.length === 0) {
             const target = normalizedMac ? normalizedMac : 'всех клиентов';
             return ctx.reply(`📜 История для ${target} пуста.`);
@@ -105,19 +106,19 @@ async function handleHistoryCommand(ctx, mac, count = 10) {
 
         let header;
         if (normalizedMac) {
-             const clientName = events[0].client.name || events[0].client.hostname || normalizedMac;
-             header = `<b>📜 История событий для ${clientName} (${events.length}):</b>\n`;
+            const clientName = events[0].client.name || events[0].client.hostname || normalizedMac;
+            header = `<b>📜 История событий для ${clientName} (${events.length}):</b>\n`;
         } else {
-             header = `<b>📜 Последние события (${events.length}):</b>\n`;
+            header = `<b>📜 Последние события (${events.length}):</b>\n`;
         }
-        
+
         const lines = events.map(e => {
             const date = new Date(e.timestamp);
-            const timeStr = date.toLocaleString('ru-RU', { 
-                day: '2-digit', month: '2-digit', 
-                hour: '2-digit', minute: '2-digit' 
+            const timeStr = date.toLocaleString('ru-RU', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
             });
-            
+
             let icon = '⚪';
             if (e.type === 'CONNECTED') icon = '🟢';
             else if (e.type === 'DISCONNECTED') icon = '🔴';
@@ -131,7 +132,7 @@ async function handleHistoryCommand(ctx, mac, count = 10) {
         });
 
         const message = header + '\n' + lines.join('\n');
-        
+
         if (message.length > 4000) {
             ctx.replyWithHTML(message.substring(0, 4000) + '\n...');
         } else {
@@ -143,15 +144,69 @@ async function handleHistoryCommand(ctx, mac, count = 10) {
     }
 }
 
+async function sendClientList(ctx) {
+    try {
+        const clients = await monitorService.getOnlineClients();
+        if (clients.length === 0) {
+            return ctx.reply('Нет активных клиентов.');
+        }
+
+        const lines = clients.map(c => {
+            // Форматирование даты
+            const date = new Date(c.lastStatusChange);
+            const timeStr = date.toLocaleString('ru-RU', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+
+            // Формируем ссылку для скрытого вызова команды через Deep Linking
+            let macDisplay = c.mac || '';
+            // Заменяем двоеточия на _, так как в URL параметры могут быть ограничены
+            const macParam = c.mac ? c.mac.replace(/:/g, '_') : 'N/A';
+
+            // if (c.mac && botUsername) {
+            //     macDisplay = `<a href="https://t.me/${botUsername}?start=history_${macParam}">${c.mac}</a>`;
+            // }
+
+            // Расчет Uptime
+            const now = new Date();
+            const uptimeMs = now.getTime() - date.getTime();
+            const uptimeStr = monitorService.formatDuration(uptimeMs);
+
+            let nameDisplay = c.hostname || c.name || 'N/A';
+            if (nameDisplay && BOT_USERNAME) {
+                nameDisplay = `<a href="https://t.me/${BOT_USERNAME}?start=history_${macParam}">${nameDisplay}</a>`
+            }
+
+            const name = `${nameDisplay}  -  🌐 IP: ${c.ip || 'N/A'}  -  ${macDisplay}`;
+            return `📱 <b>${name}</b>\n└ 🕒 В сети с: ${timeStr} (${uptimeStr})`;
+        });
+
+        // Разбиваем на сообщения, если список слишком длинный (лимит Telegram ~4096)
+        // Для простоты пока отправляем одним, или первыми 20-30
+        const message = `<b>Список онлайн клиентов (${clients.length}):</b>\n\n${lines.join('\n\n')}`;
+
+        if (message.length > 4000) {
+            // Простая обрезка, если очень много клиентов
+            ctx.replyWithHTML(message.substring(0, 4000) + '\n\n... (список обрезан)');
+        } else {
+            ctx.replyWithHTML(message);
+        }
+    } catch (e) {
+        logger.error('Ошибка в функции sendClientList:', e);
+        ctx.reply('❌ Ошибка получения списка клиентов.');
+    }
+}
+
 bot.start(async (ctx) => {
     const chatId = ctx.chat.id;
     addSubscriber(chatId);
 
     // Проверка payload (deep linking)
-    const payload = ctx.payload || (ctx.message.text.split(' ')[1]); 
+    const payload = ctx.payload || (ctx.message.text.split(' ')[1]);
     if (payload && payload.startsWith('history_')) {
         botLogger.info(`Deep link history request от ${chatId}`);
-        
+
         // Удаляем сообщение /start чтобы не засорять чат
         try {
             await ctx.deleteMessage();
@@ -172,60 +227,67 @@ bot.command('history', async (ctx) => {
     const parts = ctx.message.text.split(' ');
     const mac = parts[1];
     const count = parts[2] ? parseInt(parts[2]) : 10;
-    
+
     await handleHistoryCommand(ctx, mac, count);
 });
 
 bot.command('list', async (ctx) => {
     botLogger.info(`Получена команда /list от ${ctx.chat.id} (@${ctx.from?.username})`);
+    await sendClientList(ctx);
+});
+
+bot.command('scan', async (ctx) => {
+    botLogger.info(`Получена команда /scan от ${ctx.chat.id} (@${ctx.from?.username})`);
+    await ctx.reply('🔄 Запуск принудительного сканирования...');
     try {
-        const clients = await monitorService.getOnlineClients();
-        if (clients.length === 0) {
-            return ctx.reply('Нет активных клиентов.');
-        }
-
-        const lines = clients.map(c => {
-            // Форматирование даты
-            const date = new Date(c.lastStatusChange);
-            const timeStr = date.toLocaleString('ru-RU', { 
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit', second: '2-digit' 
-            });
-            
-            // Формируем ссылку для скрытого вызова команды через Deep Linking
-            // Если бот запущен, ctx.botInfo должен быть доступен. Если нет, fallback на обычный текст.
-            const botUsername = ctx.botInfo?.username;
-            let macDisplay = c.mac || '';
-            
-            if (c.mac && botUsername) {
-                // Заменяем двоеточия на _, так как в URL параметры могут быть ограничены
-                const macParam = c.mac.replace(/:/g, '_');
-                macDisplay = `<a href="https://t.me/${botUsername}?start=history_${macParam}">${c.mac}</a>`;
-            }
-
-            // Расчет Uptime
-            const now = new Date();
-            const uptimeMs = now.getTime() - date.getTime();
-            const uptimeStr = monitorService.formatDuration(uptimeMs);
-
-            const name = `${c.hostname || c.name || 'N/A'}  -  ${macDisplay}  -  🌐 IP: ${c.ip || 'N/A'}`;
-            return `📱 <b>${name}</b>\n└ 🕒 В сети с: ${timeStr} (${uptimeStr})`;
-        });
-
-        // Разбиваем на сообщения, если список слишком длинный (лимит Telegram ~4096)
-        // Для простоты пока отправляем одним, или первыми 20-30
-        const message = `<b>Список онлайн клиентов (${clients.length}):</b>\n\n${lines.join('\n\n')}`;
-        
-        if (message.length > 4000) {
-             // Простая обрезка, если очень много клиентов
-             ctx.replyWithHTML(message.substring(0, 4000) + '\n\n... (список обрезан)');
-        } else {
-             ctx.replyWithHTML(message);
-        }
+        await runNetworkScan();
+        await ctx.reply('✅ Сканирование завершено.');
+        await sendClientList(ctx);
     } catch (e) {
-        logger.error('Ошибка в команде /list:', e);
-        ctx.reply('❌ Ошибка получения списка клиентов.');
+        logger.error('Ошибка в команде /scan:', e);
+        ctx.reply('❌ Ошибка при сканировании.');
     }
+});
+
+bot.command('test', async (ctx) => {
+    botLogger.info(`Получена команда /test от ${ctx.chat.id}`);
+
+    // Попытка получить реального клиента для примера
+    let client = await monitorService.prisma.client.findFirst();
+
+    // Если база пустая, создаем фейкового клиента
+    if (!client) {
+        client = {
+            mac: '00:11:22:33:44:55',
+            ip: '192.168.1.100',
+            name: 'TestDevice',
+            hostname: 'TestHost',
+            lastStatusChange: new Date()
+        };
+    }
+
+    const now = new Date();
+
+    // Эмуляция событий
+    const changeOnline = {
+        type: 'CONNECTED',
+        client: client,
+        lastStatusChange: now,
+        message: 'ONLINE. был оффлайн 1ч 5м'
+    };
+
+    const changeOffline = {
+        type: 'DISCONNECTED',
+        client: client,
+        lastStatusChange: now,
+        message: 'OFFLINE. был в сети 5ч 30м'
+    };
+
+    const msg1 = formatNotificationMessage(changeOnline);
+    const msg2 = formatNotificationMessage(changeOffline);
+
+    await ctx.replyWithHTML(msg1);
+    await ctx.replyWithHTML(msg2);
 });
 
 // Запуск бота
@@ -245,48 +307,58 @@ process.once('SIGTERM', () => bot.stop('SIGTERM'));
 // --- Периодический опрос (Cron) ---
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/2 * * * *';
 
+// --- Вспомогательные функции ---
+function formatNotificationMessage(change) {
+    let icon = '❓';
+    let title = 'Статус изменен';
+
+    if (change.type === 'CONNECTED') {
+        icon = '🟢';
+        title = 'ONLINE';
+    } else if (change.type === 'DISCONNECTED') {
+        icon = '🔴';
+        title = 'OFFLINE';
+    }
+
+    let name = change.client.hostname || change.client.name || change.client.mac;
+    if (change.client.mac) {
+        name = `<a href="https://t.me/${BOT_USERNAME}?start=history_${change.client.mac.replace(/:/g, '_')}">${name}</a>`;
+    }
+    const ip = change.client.ip ? ` ${change.client.ip}` : '';
+    const mac = change.client.mac ? ` ${change.client.mac}` : '';
+
+    return `${icon} <b>${name}</b> ${title} || ${change.lastStatusChange.toLocaleString()}\n${ip} ${mac}\n${change.message}`;
+}
+
 async function runNetworkScan() {
     logger.info('Запуск сканирования сети...');
-    
+
     if (subscribers.size === 0) {
         logger.warn('Нет подписчиков (Chat ID). Отправьте /start боту.');
         return;
     }
 
     const keenetic = new KeeneticClient();
-    
+
     try {
         const isAuth = await keenetic.authenticate();
         if (isAuth) {
             await keenetic.getSystemInfo(); // Поддержание активности / проверка
             const clients = await keenetic.getHotspotClients();
-            
+
             // Получаем изменения
             const changes = await monitorService.updateClients(clients);
-            
+
             if (changes && changes.length > 0) {
                 logger.info(`Обнаружено ${changes.length} изменений. Отправка уведомлений...`);
-                
-                for (const change of changes) {
-                    let icon = '❓';
-                    let title = 'Статус изменен';
-                    
-                    if (change.type === 'CONNECTED') {
-                        icon = '🟢';
-                        title = 'Появился в сети';
-                    } else if (change.type === 'DISCONNECTED') {
-                        icon = '🔴';
-                        title = 'Вышел из сети';
-                    }
 
-                    const name = change.client.name || change.client.hostname || change.client.mac;
-                    const ip = change.client.ip ? ` (${change.client.ip})` : '';
-                    const message = `${icon} <b>${name}</b>${ip}\n${title}\n${change.message}`;
-                    
+                for (const change of changes) {
+                    const message = formatNotificationMessage(change);
+
                     // Рассылка всем подписчикам
                     for (const chatId of subscribers) {
                         try {
-                            await bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML' });
+                            await bot.telegram.sendMessage(chatId, message, { parse_mode: 'HTML', disable_web_page_preview: true });
                         } catch (err) {
                             logger.error(`Ошибка отправки сообщения пользователю ${chatId}: ${err.message}`);
                         }

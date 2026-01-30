@@ -14,9 +14,9 @@ class MonitorService {
     }
 
     /**
-     * Updates client status in DB based on fetched list
-     * @param {Array} fetchedClients - List of active clients from Router
-     * @returns {Promise<Array>} List of changes/events
+     * Обновляет статус клиентов в базе данных на основе списка, полученного от роутера
+     * @param {Array} fetchedClients - Список активных клиентов от роутера
+     * @returns {Promise<Array>} Список изменений/событий
      */
     async updateClients(fetchedClients) {
         const changes = [];
@@ -24,7 +24,7 @@ class MonitorService {
 
         const now = new Date();
         const fetchedMap = new Map();
-        
+
         // 1. Process Fetched Clients
         for (const fc of fetchedClients) {
             if (!fc.mac) continue;
@@ -34,7 +34,7 @@ class MonitorService {
             const ip = fc.ip || null;
             const name = fc.name || fc.hostname || null;
             const hostname = fc.hostname || null;
-            
+
             // Extract interface name properly (it can be an object or string)
             let iface = null;
             if (fc.interface) {
@@ -46,7 +46,7 @@ class MonitorService {
                     iface = fc.interface.id;   // e.g., "Bridge0"
                 }
             }
-            
+
             const ssid = fc.ssid || null;
 
             // Check if client exists
@@ -54,7 +54,7 @@ class MonitorService {
 
             if (!existing) {
                 // New Client
-                logger.info(`[Monitor] New client detected: ${mac} (${name})`);
+                logger.info(`[Monitor] Обнаружено новое устройство: ${mac} (${name})`);
                 const newClient = await this.prisma.client.create({
                     data: {
                         mac, ip, name, hostname, interface: iface, ssid,
@@ -64,8 +64,8 @@ class MonitorService {
                         lastStatusChange: now
                     }
                 });
-                await this.logEvent(mac, 'CONNECTED', 'New device detected');
-                changes.push({ type: 'CONNECTED', client: newClient, message: 'New device detected' });
+                await this.logEvent(mac, 'CONNECTED', 'Обнаружено новое устройство');
+                changes.push({ type: 'CONNECTED', client: newClient, message: 'Обнаружено новое устройство' });
             } else {
                 // Existing Client
                 const wasOnline = existing.isOnline;
@@ -88,17 +88,17 @@ class MonitorService {
                 if (!wasOnline) {
                     const offlineDurationMs = now.getTime() - existing.lastStatusChange.getTime();
                     const offlineText = this.formatDuration(offlineDurationMs);
-                    
+
                     logger.info(`[Monitor] Клиент ${mac} снова в сети: ${name} (Оффлайн for ${offlineText})`);
-                    
+
                     updateData.lastStatusChange = now;
-                    await this.logEvent(mac, 'CONNECTED', `Back online. Offline for ${offlineText}`);
-                    
+                    await this.logEvent(mac, 'CONNECTED', `ONLINE.  был оффлайн ${offlineText}`);
+
                     // Merge existing with updateData for the event object
-                    changes.push({ 
-                        type: 'CONNECTED', 
-                        client: { ...existing, ...updateData }, 
-                        message: `Back online. Offline for ${offlineText}` 
+                    changes.push({
+                        type: 'CONNECTED',
+                        client: { ...existing, ...updateData },
+                        message: `ONLINE.  был оффлайн ${offlineText}`
                     });
                 } else if (details.length > 0) {
                     logger.info(`[Monitor] Client updated: ${mac} - ${details.join(', ')}`);
@@ -139,11 +139,12 @@ class MonitorService {
                     }
                 });
 
-                await this.logEvent(dbClient.mac, 'DISCONNECTED', `Online for ${onlineText}`);
-                changes.push({ type: 'DISCONNECTED', client: dbClient, message: `Online for ${onlineText}` });
+                const updatedClient = { ...dbClient, isOnline: false, lastStatusChange: now };
+                await this.logEvent(dbClient.mac, 'DISCONNECTED', `OFFLINE.  был в сети ${onlineText}`);
+                changes.push({ type: 'DISCONNECTED', client: updatedClient, message: `OFFLINE.  был в сети ${onlineText}` });
             }
         }
-        
+
         return changes;
     }
 
@@ -155,10 +156,10 @@ class MonitorService {
     }
 
     /**
-     * Get event history for a specific client or all clients
-     * @param {string|null} mac - MAC address of the client (optional)
-     * @param {number} limit - Number of events to retrieve (default: 10)
-     * @returns {Promise<Array>} List of events with client details
+     * Получает историю событий для конкретного клиента или всех клиентов
+     * @param {string|null} mac - MAC-адрес клиента (необязательно)
+     * @param {number} limit - Количество событий для извлечения (по умолчанию: 10)
+     * @returns {Promise<Array>} Список событий с деталями клиента
      */
     async getClientHistory(mac, limit = 10) {
         const where = mac ? { clientMac: mac } : {};
@@ -186,7 +187,7 @@ class MonitorService {
         const seconds = Math.floor(ms / 1000);
         const minutes = Math.floor(seconds / 60);
         const hours = Math.floor(minutes / 60);
-        
+
         if (hours > 0) return `${hours}ч ${minutes % 60}м`;
         if (minutes > 0) return `${minutes}м ${seconds % 60}с`;
         return `${seconds}с`;
