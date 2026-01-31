@@ -65,7 +65,12 @@ class MonitorService {
                     }
                 });
                 await this.logEvent(mac, 'CONNECTED', 'Обнаружено новое устройство');
-                changes.push({ type: 'CONNECTED', client: newClient, message: 'Обнаружено новое устройство' });
+                changes.push({
+                    type: 'CONNECTED',
+                    client: newClient,
+                    message: 'Обнаружено новое устройство',
+                    lastStatusChange: now
+                });
             } else {
                 // Existing Client
                 const wasOnline = existing.isOnline;
@@ -98,7 +103,8 @@ class MonitorService {
                     changes.push({
                         type: 'CONNECTED',
                         client: { ...existing, ...updateData },
-                        message: `ONLINE.  был оффлайн ${offlineText}`
+                        message: `ONLINE.  был оффлайн ${offlineText}`,
+                        lastStatusChange: now
                     });
                 } else if (details.length > 0) {
                     logger.info(`[Monitor] Client updated: ${mac} - ${details.join(', ')}`);
@@ -141,7 +147,12 @@ class MonitorService {
 
                 const updatedClient = { ...dbClient, isOnline: false, lastStatusChange: now };
                 await this.logEvent(dbClient.mac, 'DISCONNECTED', `OFFLINE.  был в сети ${onlineText}`);
-                changes.push({ type: 'DISCONNECTED', client: updatedClient, message: `OFFLINE.  был в сети ${onlineText}` });
+                changes.push({
+                    type: 'DISCONNECTED',
+                    client: updatedClient,
+                    message: `OFFLINE.  был в сети ${onlineText}`,
+                    lastStatusChange: now
+                });
             }
         }
 

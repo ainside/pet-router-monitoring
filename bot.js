@@ -114,11 +114,8 @@ async function handleHistoryCommand(ctx, mac, count = 10) {
 
         const lines = events.map(e => {
             const date = new Date(e.timestamp);
-            const timeStr = date.toLocaleString('ru-RU', {
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit'
-            });
-
+            const timeStr = formatDate(date);
+            
             let icon = '⚪';
             if (e.type === 'CONNECTED') icon = '🟢';
             else if (e.type === 'DISCONNECTED') icon = '🔴';
@@ -154,10 +151,7 @@ async function sendClientList(ctx) {
         const lines = clients.map(c => {
             // Форматирование даты
             const date = new Date(c.lastStatusChange);
-            const timeStr = date.toLocaleString('ru-RU', {
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit', second: '2-digit'
-            });
+            const timeStr = formatDate(date, true);
 
             // Формируем ссылку для скрытого вызова команды через Deep Linking
             let macDisplay = c.mac || '';
@@ -307,6 +301,17 @@ process.once('SIGTERM', () => bot.stop('SIGTERM'));
 // --- Периодический опрос (Cron) ---
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '*/2 * * * *';
 
+function formatDate(date, withSeconds = false) {
+    const options = {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+    };
+    if (withSeconds) {
+        options.second = '2-digit';
+    }
+    return date.toLocaleString('ru-RU', options);
+}
+
 // --- Вспомогательные функции ---
 function formatNotificationMessage(change) {
     let icon = '❓';
@@ -327,7 +332,7 @@ function formatNotificationMessage(change) {
     const ip = change.client.ip ? ` ${change.client.ip}` : '';
     const mac = change.client.mac ? ` ${change.client.mac}` : '';
 
-    return `${icon} <b>${name}</b> ${title} || ${change.lastStatusChange.toLocaleString()}\n${ip} ${mac}\n${change.message}`;
+    return `${icon} <b>${name}</b> ${title} || ${formatDate(change.lastStatusChange, true)}\n${ip} ${mac}\n${change.message}`;
 }
 
 async function runNetworkScan() {
