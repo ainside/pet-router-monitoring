@@ -106,7 +106,7 @@ async function handleHistoryCommand(ctx, mac, count = 10) {
 
         let header;
         if (normalizedMac) {
-            const clientName = events[0].client.name || events[0].client.hostname || normalizedMac;
+            const clientName = events[0].client.hostname || events[0].client.name || normalizedMac;
             header = `<b>📜 История событий для ${clientName} (${events.length}):</b>\n`;
         } else {
             header = `<b>📜 Последние события (${events.length}):</b>\n`;
@@ -121,7 +121,7 @@ async function handleHistoryCommand(ctx, mac, count = 10) {
             else if (e.type === 'DISCONNECTED') icon = '🔴';
             else if (e.type === 'UPDATED') icon = '🔵';
 
-            const name = e.client.name || e.client.hostname || e.clientMac;
+            const name = e.client.hostname || e.client.name || e.clientMac;
             // Если история глобальная, добавляем имя клиента в строку
             const details = normalizedMac ? (e.details || e.type) : `<b>${name}</b>: ${e.details || e.type}`;
 
