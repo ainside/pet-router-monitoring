@@ -329,10 +329,12 @@ function formatNotificationMessage(change) {
     if (change.client.mac) {
         name = `<a href="https://t.me/${BOT_USERNAME}?start=history_${change.client.mac.replace(/:/g, '_')}">${name}</a>`;
     }
-    const ip = change.client.ip ? ` ${change.client.ip}` : '';
-    const mac = change.client.mac ? ` ${change.client.mac}` : '';
 
-    return `${icon} <b>${name}</b> ${title} || ${formatDate(change.lastStatusChange, true)}\n${ip} ${mac}\n${change.message}`;
+    return `${icon} <b>${name}</b> ${title} at ${formatDate(change.lastStatusChange, true)}\n└${change.message}`;
+
+    // const ip = change.client.ip ? ` ${change.client.ip}` : '';
+    // const mac = change.client.mac ? ` ${change.client.mac}` : '';
+    // return `${icon} <b>${name}</b> ${title} || ${formatDate(change.lastStatusChange, true)}\n${ip} ${mac}\n${change.message}`;
 }
 
 async function runNetworkScan() {
